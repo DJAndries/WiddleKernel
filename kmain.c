@@ -26,6 +26,8 @@
 #define FB_HIGH_BYTE_COMMAND    14
 #define FB_LOW_BYTE_COMMAND     15
 
+char gdt_entries[24];
+gdt gdttable;
 unsigned short currPos = 0;
 /** fb_move_cursor:
 *  Moves the cursor of the framebuffer to the given position
@@ -57,7 +59,7 @@ void fb_write_cell(unsigned int i, char c, unsigned char fg, unsigned char bg)
 	fb[i + 1] = ((fg & 0x0F) << 4) | (bg & 0x0F);
 }
 
-int write(char *buf) {
+int fb_write(char *buf) {
 	while(*buf != 0) {
 		fb_move_cursor(currPos);
 		fb_write_cell(2 * currPos++, *buf, FB_GREEN, FB_DARK_GREY);
@@ -83,7 +85,63 @@ void serial_configure_line(unsigned short com)
  */
 	outb(SERIAL_LINE_COMMAND_PORT(com), 0x03);
 }
+/** serial_is_transmit_fifo_empty:
+*  Checks whether the transmit FIFO queue is empty or not for the given COM
+*  port.
+*
+*  @param  com The COM port
+*  @return 0 if the transmit FIFO queue is not empty
+*          1 if the transmit FIFO queue is empty
+*/
+int serial_is_transmit_fifo_empty(unsigned int com)
+{
+	/* 0x20 = 0010 0000 */
+	return inb(SERIAL_LINE_STATUS_PORT(com)) & 0x20;
+}
+int serial_write(char *buf, unsigned short com) {
+	serial_configure_baud_rate(com, 2);
+	serial_configure_line(com);
+	while(*buf != 0) {
+		if((serial_is_transmit_fifo_empty(com) & 0x20) == 0x00)
+			continue;
+		outb(SERIAL_DATA_PORT(com), *buf);
+		buf++;
+	}
+	return currPos;
+}
+
+void load_gdt_entries() {
+	int i;
+	for (i = 0; i < 9; i++)
+		gdt_entries[i] = 0;
+	gdt_entries[i++] = 0x40;
+	gdt_entries[i++] = 0x9A;
+	gdt_entries[i++] = 0x00;
+
+	gdt_entries[i++] = 0x00;
+	gdt_entries[i++] = 0x00;
+	gdt_entries[i++] = 0x00;
+	gdt_entries[i++] = 0x00;
+
+	gdt_entries[i++] = 0x00;
+	gdt_entries[i++] = 0x40;
+	gdt_entries[i++] = 0x90;
+	gdt_entries[i++] = 0x00;
+
+	gdt_entries[i++] = 0x00;
+	gdt_entries[i++] = 0x00;
+	gdt_entries[i++] = 0x00;
+	gdt_entries[i++] = 0x00;
+}
 void kmain() {
 	char bing[34] = "wowowow";
-	write(bing);
+	char bong[50] = "JEJEJEJEJEJ";
+	
+	gdttable.address = (unsigned int)gdt_entries;
+	gdttable.size = 24;
+	load_gdt_entries();
+	ggdt((unsigned int)&gdttable);
+	
+	serial_write(bong, SERIAL_COM1_BASE);
+	fb_write(bing);
 }
